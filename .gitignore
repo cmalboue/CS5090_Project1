@@ -10,3 +10,10 @@ __pycache__/
 input.txt
 env/
 venv/
+out-python-baseline/
+out-python-ablation/
+*.pt
+
+
+data/corpus/raw_data/
+
