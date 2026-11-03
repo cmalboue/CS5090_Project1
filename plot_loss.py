@@ -58,12 +58,12 @@ if not steps_base or not steps_abl:
     exit(1)
 
 plt.figure(figsize=(9, 5.5), dpi=150)
-plt.plot(steps_base, val_base, label="Baseline (6 Heads) - Val", color="#1f77b4", marker="o", linewidth=2)
+plt.plot(steps_base, val_base, label="Baseline (4 Heads) - Val", color="#1f77b4", marker="o", linewidth=2)
 plt.plot(steps_abl, val_abl, label="Ablation (1 Head) - Val", color="#d62728", marker="s", linewidth=2)
-plt.plot(steps_base, tr_base, label="Baseline (6 Heads) - Train", color="#1f77b4", linestyle="--", alpha=0.5)
+plt.plot(steps_base, tr_base, label="Baseline (4 Heads) - Train", color="#1f77b4", linestyle="--", alpha=0.5)
 plt.plot(steps_abl, tr_abl, label="Ablation (1 Head) - Train", color="#d62728", linestyle="--", alpha=0.5)
 
-plt.title("NanoGPT: Baseline (6 Heads) vs Ablation (1 Head)", fontsize=12, fontweight="bold")
+plt.title("NanoGPT: Baseline (4 Heads) vs Ablation (1 Head)", fontsize=12, fontweight="bold")
 plt.xlabel("Step", fontsize=10)
 plt.ylabel("Cross-Entropy Loss", fontsize=10)
 plt.grid(True, linestyle="--", alpha=0.5)

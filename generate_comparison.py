@@ -5,32 +5,29 @@ from model import GPTConfig, GPT
 from tokenizers import Tokenizer
 
 # ---------------------------------------------------------
-# Configuration
+# Configuration: Optimized to Highlight Attention Subspaces
 # ---------------------------------------------------------
-prompt = "def "
+prompt = 'def is_sorted(arr: list) -> bool:\n    """\n    '
+
 baseline_dir = "out-python-baseline"
 ablation_dir = "out-python-ablation"
 out_file = "phase1_side_by_side_completion.md"
 tokenizer_path = os.path.join("data", "corpus", "tokenizer.json")
 
 num_samples = 3
-max_new_tokens = 100
-temperature = 0.8
-top_k = 200
+max_new_tokens = 40
+temperature = 0.35
+top_k = 10
 seed = 1337
+
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16'
 # ---------------------------------------------------------
-
-torch.manual_seed(seed)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed(seed)
 
 device_type = 'cuda' if 'cuda' in device else 'cpu'
 ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
 ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
-# Load your custom 8,192 BPE tokenizer
 if not os.path.exists(tokenizer_path):
     raise FileNotFoundError(f"Cannot find custom tokenizer at: {tokenizer_path}")
 
@@ -41,12 +38,17 @@ decode = lambda l: tokenizer.decode(l)
 start_ids = encode(prompt)
 x = torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...]
 
+def set_seed(s):
+    torch.manual_seed(s)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(s)
+
 def generate_samples_from_ckpt(ckpt_dir, n_samples):
     ckpt_path = os.path.join(ckpt_dir, 'ckpt.pt')
     if not os.path.exists(ckpt_path):
-        return f"Error: Checkpoint missing in {ckpt_dir}", [f"[!] File not found: {ckpt_path}"]
+        return f"Error: Checkpoint missing in {ckpt_dir}", [f"[!] File not found: {ckpt_path}"], "unknown"
     
-    checkpoint = torch.load(ckpt_path, map_location=device)
+    checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
     gptconf = GPTConfig(**checkpoint['model_args'])
     model = GPT(gptconf)
     
@@ -60,6 +62,8 @@ def generate_samples_from_ckpt(ckpt_dir, n_samples):
     model.eval()
     model.to(device)
     
+    set_seed(seed)
+    
     samples = []
     with torch.no_grad():
         with ctx:
@@ -71,12 +75,17 @@ def generate_samples_from_ckpt(ckpt_dir, n_samples):
     n_layer = checkpoint['model_args'].get('n_layer', 'unknown')
     n_embd = checkpoint['model_args'].get('n_embd', 'unknown')
     header_info = f"Checkpoint: {ckpt_dir} (n_layer={n_layer}, n_head={n_head}, n_embd={n_embd})"
-    return header_info, samples
+    
+    del model
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        
+    return header_info, samples, n_head
 
 print(f"[*] Generating {num_samples} samples each using {tokenizer_path}...")
 
-base_info, base_samples = generate_samples_from_ckpt(baseline_dir, num_samples)
-abl_info, abl_samples = generate_samples_from_ckpt(ablation_dir, num_samples)
+base_info, base_samples, base_heads = generate_samples_from_ckpt(baseline_dir, num_samples)
+abl_info, abl_samples, abl_heads = generate_samples_from_ckpt(ablation_dir, num_samples)
 
 lines = [
     "# Phase 1: Side-by-Side Generation Comparison",
@@ -92,12 +101,12 @@ lines = [
     "",
     "## Prompt",
     "```python",
-    prompt.strip(),
+    prompt.rstrip(),
     "```",
     "",
     "---",
     "",
-    "## 1. Baseline Model Completions (6 Heads)",
+    f"## 1. Baseline Model Completions ({base_heads} Heads)",
     f"**{base_info}**",
     ""
 ]
@@ -114,7 +123,7 @@ for idx, sample in enumerate(base_samples, 1):
 lines.extend([
     "---",
     "",
-    "## 2. Ablation Model Completions (1 Head)",
+    f"## 2. Ablation Model Completions ({abl_heads} Head)",
     f"**{abl_info}**",
     ""
 ])
@@ -133,6 +142,5 @@ report_text = "\n".join(lines)
 with open(out_file, "w", encoding="utf-8") as f:
     f.write(report_text)
 
-print(f"\n[+] Successfully generated all samples without tokenizer mismatch!")
+print(f"\n[+] Successfully generated all samples!")
 print(f"[+] Output saved to: {out_file}\n")
-print(report_text)
