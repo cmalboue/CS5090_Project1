@@ -1,3 +1,189 @@
+<hr>
+
+# CS 5090 Project 1: Build & Evaluate a Small Code Language Model
+
+**Course:** CS 5090 - Software Engineering with Generative AI <br>
+**Author:** Charlotte Malbouef <br>
+**Institution:** Michigan Technological University  <br>
+**Repository:** https://github.com/cmalboue/CS5090_Project1.git <br>
+
+<hr>
+
+## 1. Project Additions vs. Base nanoGPT
+
+This repository builds upon Andrej Karpathy's `nanoGPT`. Below is the explicit file map distinguishing what was added for Project 1 from the original repository:
+
+### Added & Project-Specific Files
+*   **Documentation & Logs:**
+    *   `baseline_run.log` — Training stdout log for the 4-head baseline (1,600 steps).
+    *   `baseline_run_ablation.log` — Training stdout log for the 1-head ablation (1,600 steps).
+    *   `val_loss_comparison.png` — Validation and training cross-entropy loss comparison curves.
+    *   `plot_loss.py` — Log extraction and visualization script.
+*   **Configurations (`config/`):**
+    *   `config/train_python.py` — Baseline 4-head model configuration (`n_layer=4, n_head=4, n_embd=256`).
+    *   `config/train_python_ablation.py` — Ablated 1-head model configuration (`n_layer=4, n_head=1, n_embd=256`).
+*   **Data Preparation (`data/corpus/`):**
+    *   `data/corpus/prepare.py` — Scraping pipeline: deduplication via SHA-256, AST syntax validation, 90/10 train-test split, and custom BPE training.
+    *   `data/corpus/tokenizer.json` — Trained Byte-Level BPE tokenizer (`vocab_size=8192`).
+    *   `data/corpus/meta.pkl` — Corpus token statistics and configuration metadata.
+    *   `data/corpus/train.bin`, `data/corpus/val.bin` — Binary tokenized training (~1.2M tokens) and validation datasets.
+*   **Phase 1 (Ablation Comparison):**
+    *   `generate_comparison.py` — Side-by-side sampling script across checkpoints (`seed=1337`).
+    *   `phase1_side_by_side_completion.md` — Qualitative output comparison between 4-head baseline and 1-head ablation.
+*   **Phase 2 (Software Engineering Task):**
+    *   `run_phase2_eval.py` — Test runner executing docstring generation over 20 canonical Python functions.
+    *   `phase2_evaluation_results.md` — Full prompt logs, completions, and Accept/Edit/Reject judgments.
+*   **Phase 3 (Evaluate & Break):**
+    *   `phase3_probe.py` — Targeted vulnerability harness running 22 adversarial probes.
+    *   `phase3_findings.csv` — Mandatory CSV findings table documenting failures, categories, and testability.
+    *   `phase3_probe_results.md` — Raw prompt and generation logs across all 6 failure categories.
+*   **Phase 4 (Improve & Re-evaluate):**
+    *   `phase4_intervention.py` — Repetition penalty decoding intervention runner.
+    *   `phase4_comparison.csv` — Before vs. after intervention outcomes across all 22 probes.
+    *   `phase4_comparison_results.md` — Side-by-side completion records and regression analysis.
+
+### Original nanoGPT Foundation
+*   `model.py` — Core GPT transformer architecture (unmodified).
+*   `train.py` — Training loop with AdamW optimizer and mixed-precision execution.
+*   `sample.py` — Autoregressive sampling entry point.
+*   `config/` (other) & `data/` (openwebtext, shakespeare) — Original template resources.
+
+---
+
+## 2. Environment & Dependency Specifications
+
+*   **Operating System:** Windows 11 (PowerShell 7)
+*   **Hardware Accelerator:** NVIDIA GeForce RTX 4060 Laptop GPU (8GB VRAM)
+*   **Compute Stack:** Python 3.10+, PyTorch with CUDA support, `tokenizers`, `matplotlib`, `numpy`, `pandas`
+
+```powershell
+# Create environment and install dependencies
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install torch torchvision torchaudio --index-url [https://download.pytorch.org/whl/cu121](https://download.pytorch.org/whl/cu121)
+pip install numpy tokenizers matplotlib pandas
+```
+<hr>
+
+## 3. Data Preparation & Reproduction Instructions
+
+The training corpus is composed of three permissively licensed repositories: `TheAlgorithms/Python`, `faif/python-patterns`, and `trekhleb/learn-python`.
+
+### Preprocessing and Tokenizer Generation
+Execute the end-to-end data preparation pipeline:
+
+```powershell
+python data/corpus/prepare.py
+```
+
+* **Deduplication:** Uses SHA-256 content hashing to identify and discard exact duplicate source files.
+* **AST Validation:** Employs Python's `ast.parse()` to drop unparseable or corrupted files, eliminating syntax junk.
+* **Dataset Partitioning:** Deterministically splits clean files into 90% training and 10% validation sets using random seed `1337`.
+* **Tokenizer Training:** Trains a custom Byte-Level Byte-Pair Encoding (BPE) tokenizer strictly on the training split with a target vocabulary size of 8,192.
+* **Binary Compilation:** Encodes tokenized sequences delimited by `<|endoftext|>` into `uint16` binary files:
+  * `data/corpus/train.bin` (~1,192,089 tokens)
+  * `data/corpus/val.bin` (~132,455 tokens)
+  * `data/corpus/tokenizer.json`
+  * `data/corpus/meta.pkl`
+
+<hr>
+
+## 4. Model Training & Ablation Reproduction
+
+Training is executed with AdamW next-token cross-entropy loss, bfloat16 mixed precision, and gradient accumulation.
+
+### Step 4.1: Train the Baseline Model (4 Attention Heads)
+Train the 5.25M-parameter baseline configuration (`n_layer=4`, `n_head=4`, `n_embd=256`, `block_size=512`):
+
+```powershell
+python train.py config/train_python.py
+```
+* **Logging:** Outputs are printed every 100 steps and captured in `baseline_run.log`.
+* **Peak Stopping Point:** Validation loss reaches its optimum at ~1,600 iterations (~3.09 val loss, ~1.70 train loss) before overfitting begins.
+* **Checkpoint Destination:** Saved to `out-python-baseline/ckpt.pt`.
+
+### Step 4.2: Train the Ablation Model (1 Attention Head)
+Train the single-head ablation model keeping all other dimensions and hyper-parameters identical (`n_head=1`):
+
+```powershell
+python train.py config/train_python_ablation.py
+```
+* **Logging:** Outputs captured in `baseline_run_ablation.log`.
+* **Convergence:** Step 1,600 yields a validation loss of ~3.03 (~0.06 lower than baseline due to reduced projection variance on the 1.3M-token corpus).
+* **Checkpoint Destination:** Saved to `out-python
+### Step 4.3: Generate Cross-Entropy Loss Curves
+Extract step metrics from both log files and render the comparative plot:
+
+```powershell
+python plot_loss.py
+```
+* **Artifact Produced:** `val_loss_comparison.png`.
+
+<hr>
+
+## 5. Phase-by-Phase Evaluation Reproduction
+
+### Step 5.1: Phase 1 Side-by-Side Generation (Baseline vs. Ablation)
+Compare sample completions across both checkpoints (`seed=1337`, `temperature=0.35`, `top_k=10`, `max_new_tokens=40`):
+
+```powershell
+python generate_comparison.py
+```
+* **Artifact Produced:** `phase1_side_by_side_completion.md`.
+
+### Step 5.2: Phase 2 Real SE Task Evaluation (Docstring Generation)
+Run the baseline model on the 20 canonical software engineering function signatures:
+
+```powershell
+python run_phase2_eval.py
+```
+* **Artifact Produced:** `phase2_evaluation_results.md`.
+* **Evaluation Tallies:**
+  * **Accept as-is:** 0 / 20 (0.0%)
+  * **Accept after editing:** 5 / 20 (25.0%) (Inputs 7, 9, 12, 15, 17)
+  * **Reject:** 15 / 20 (75.0%)
+
+### Step 5.3: Phase 3 Vulnerability Probing & Testability Assessment
+Execute the 22 targeted probes across the 6 standardized failure modes:
+
+```powershell
+python phase3_probe.py
+```
+* **Artifacts Produced:** `phase3_findings.csv` and `phase3_probe_results.md`.
+* **Failure Distribution (N = 22 Probes):**
+  * `context-ignored`: Probes 4, 5, 6, 7 -> **4/22 (18.18%)**
+  * `prompt-sensitive`: Probes 8, 9, 10, 11 -> **4/22 (18.18%)**
+  * `invented-api`: Probes 12, 13, 14, 15 -> **4/22 (18.18%)**
+  * `wrong-logic`: Probes 16, 17, 18, 19 -> **4/22 (18.18%)**
+  * `syntax`: Probes 20, 21, 22 -> **3/22 (13.64%)**
+  * `memorized`: Probes 1, 2, 3 -> **3/22 (13.64%)**
+* **Detection Rates (N = 22 Probes):**
+  * Standard Unit Tests: **3/22 (13.64%)** caught (syntax rejections only; non-crashing semantic/logic bugs bypass silent passes).
+  * Docstring Tests (`doctest`): **9/22 (40.91%)** caught (uncovers mathematically broken outputs and unclosed test loops in docstring assertions).
+
+### Step 5.4: Phase 4 Decoding Intervention & Comparative Analysis
+Re-run the 22 Phase 3 probes with an inference-level candidate repetition penalty to suppress softmax entropy collapse:
+
+```powershell
+python phase4_intervention.py
+```
+* **Artifacts Produced:** `phase4_comparison.csv` and `phase4_comparison_results.md`.
+* **Intervention Outcome Rates (N = 22 Probes):**
+  * **Major Improvement:** **5/22 (22.73%)** (Probes 4, 5, 7, 12, 19 - terminated degeneration loops, closed quote blocks cleanly)
+  * **Some Improvement:** **13/22 (59.09%)** (repetition reduced; generated varied docstring skeletons)
+  * **No Change:** **2/22 (9.09%)** (Probes 11, 18 - base logic errors persisted)
+  * **Regression:** **2/22 (9.09%)** (Probes 2, 13 - penalizing duplicate tokens broke valid repetition such as recursive base-case identifiers and nested types)
+  * **Total Positive Impact:** **18/22 (81.82%)**
+
+<hr>
+
+## 6. AI-Use Disclosure
+
+An AI coding assistant was used in a lightweight, supervised capacity during development:
+* **Scaffolding & Templates:** Generating initial file parsing logic in `data/corpus/prepare.py` and repetitive test execution harnesses.
+* **Concept Clarification:** Verifying cross-entropy formulation, attention head tensor shapes, and BPE subword edge cases.
+* **Human Control & Verification:** Every script was debugged and tested locally in PowerShell. Syntax errors, hallucinated flags, and incorrect parameters were caught and corrected manually before committing.
+* Full detailed log and human verification notes are available in Appendix 5.1 of `Project_1_Report.pdf`.
 
 # nanoGPT
 
